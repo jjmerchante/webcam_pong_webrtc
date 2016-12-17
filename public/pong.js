@@ -10,20 +10,22 @@ var vertexColorAttribute = null,
     cubeIndicesBuffer = null;
 var diskIndicesBuffer = null;
 var mvMatrix = mat4.create();
+
 masterPong = false;
 pongRunning = false;
+pongStarted = false;
 
 var mov_axis = 'y';
 
-var DX_INIT = 0.1;
-var DX_MAX = 0.58;
-var DX_INCR = 0.03;
+const DX_INIT = 0.1;
+const DX_MAX = 0.58;
+const DX_INCR = 0.03;
 
-var DY_MAX = 0.22;
-var DY_HIT_INCR = 0.31;
+const DY_MAX = 0.22;
+const DY_HIT_INCR = 0.31;
 
-var MAX_BAR_POS = 3.7;
-var DISK_FACES = 15;
+const MAX_BAR_POS = 3.7;
+const DISK_FACES = 15;
 
 var playerA = {
     posX: -6.0,
@@ -70,6 +72,7 @@ function initWebGL() {
     }
 }
 
+//JQueryUI
 function initColorBarSelection() {
     function refreshSwatch() {
         playerA.color.r = $( "#redBar" ).slider("value")/255,
@@ -116,6 +119,7 @@ function handleMouseEvent(event) {
     var rect = canvas.getBoundingClientRect();
     var x = event.clientX - rect.left;
     var y = event.clientY - rect.top;
+    // end
     if (mov_axis=='y'){
         playerA.posY = MAX_BAR_POS * (1- y/(canvas.height/2));
         if (playerA.posY > MAX_BAR_POS) playerA.posY = MAX_BAR_POS;
@@ -165,15 +169,9 @@ function sendPlayerPosition() {
 }
 
 function updateStatusPong(msg) {
-    if (!masterPong){
+    if (!masterPong && msg.disk){
         disk.posX = -msg.disk.x;
         disk.posY = msg.disk.y;
-        if (msg.score.you > playerA.score)
-            newPoint(playerA);
-        else if (msg.score.me > playerB.score)
-            newPoint(playerB);
-        playerA.score = msg.score.you;
-        playerB.score = msg.score.me;
         if (Math.abs(disk.posX) === 5.40000000001)
             iluminateDisk();
     }
@@ -181,12 +179,37 @@ function updateStatusPong(msg) {
     playerB.color = msg.player.color;
 }
 
+function updateScore(msg) {
+    window.pongRunning = false;
+    if (msg.score.you > playerA.score){
+       newPoint(playerA);
+    }else if (msg.score.me > playerB.score){
+       newPoint(playerB);
+    }
+}
+
 function newPoint(player) {
+    window.masterPong = !window.masterPong;
+    newIntervalGo(3);
     //player scores
     $( "#score" ).effect( 'shake', {}, 2000);
     player.score += 1;
     $('#localScore').html(playerA.score);
     $('#remoteScore').html(playerB.score);
+    resetDisk();
+}
+
+function newIntervalGo(timeLeft) {
+    var goInterval = setInterval(function () {
+        if (timeLeft > 0){
+            $('#timeLeft').html(timeLeft);
+        } else {
+            clearInterval(goInterval);
+            $('#timeLeft').html('GO!');
+            window.pongRunning = true;
+        }
+        timeLeft--;
+    }, 1000);
 }
 
 function setupWebGL() {
@@ -342,7 +365,7 @@ function resetDisk() {
     disk.posX = 0;
     disk.posY = 0;
     disk.dY = 0;
-    disk.dX = disk.dX < 0 ? DX_INIT : -DX_INIT;
+    disk.dX = DX_INIT;
 }
 
 function checkDiskLimits() {
@@ -357,15 +380,19 @@ function iluminateDisk() {
     setTimeout(function () {disk.color.b = 1}, 200);
 }
 
-function calculateDiskPosition() {
-    disk.posX += disk.dX;
-    disk.posY += disk.dY;
-    //Point
+function calculateDiskPosition(delta) {
+    disk.posX += disk.dX*delta;
+    disk.posY += disk.dY*delta;
+    //Point score
     if (Math.abs(disk.posX) > 7) {
         pongRunning = false;
-        if (disk.posX > 7) newPoint(playerB); else newPoint(playerA);
-        resetDisk();
-        setTimeout(function () {pongRunning=true}, 2000);
+        if (disk.posX > 7) newPoint(playerB);
+        else newPoint(playerA);
+        var objToSend = {
+            'type': 'update_score',
+            'score': {'you': playerB.score, 'me': playerA.score}
+        }
+        window.LocalDC.send(JSON.stringify(objToSend));
     }
     //Wall
     if (disk.posY > 4.8 || disk.posY < -4.8) {
@@ -375,7 +402,7 @@ function calculateDiskPosition() {
     //playerB
     if (disk.posX > 5.4 && disk.posX < 6.4 && (playerB.posY+1.5)>(disk.posY-0.4) && (playerB.posY-1.5)<(disk.posY+0.4)){
         disk.dX = -Math.abs(disk.dX);
-        disk.posX = 5.40000000001;//Corrected
+        disk.posX = 5.40000000001;//Correct position
         disk.dY += (disk.posY-playerB.posY)/1.9*DY_HIT_INCR;
         disk.dX -= DX_INCR;//level up
         checkDiskLimits();
@@ -384,7 +411,7 @@ function calculateDiskPosition() {
     //playerA
     if (disk.posX < -5.4 && disk.posX > -6.4 && (playerA.posY+1.5)>(disk.posY-0.4) && (playerA.posY-1.5)<(disk.posY+0.4)){
         disk.dX = Math.abs(disk.dX);
-        disk.posX = -5.40000000001;//Corrected
+        disk.posX = -5.40000000001;//correct position
         disk.dY += (disk.posY-playerA.posY)/1.9*DY_HIT_INCR;
         disk.dX += DX_INCR;//level up
         checkDiskLimits();
@@ -393,43 +420,58 @@ function calculateDiskPosition() {
 }
 
 function moveTestPlayer() {
-    playerA.posY = disk.posY + Math.random()*(-1.5-1.5) + 1.5;
+    playerA.posY = disk.posY + Math.random()*(-1.0-1.0) + 1.0;
 }
 
+var lastUpdate = 0;
 function drawScene() {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    if (window.pongRunning){
+    var time =  Date.now();
+    var delta = 1;
+    if (lastUpdate){
+        delta = 30*(time-lastUpdate)/1000;
+        if (delta > 1.7)
+            console.log(delta)
+    }
+    lastUpdate = time;
+    if (window.pongStarted && window.pongRunning && window.masterPong){
+        calculateDiskPosition(delta);
+    }
+    if (window.pongStarted){
         if (window.masterPong){
-            calculateDiskPosition();
             sendGameStatus();
         } else {
             sendPlayerPosition();
         }
     }
+
     //moveTestPlayer();
-    drawDisk();
+
+    //cube buffer
+    bindCubeBuffers();// 1 method for performance
     drawBarPlayer(playerA);
     drawBarPlayer(playerB);
     drawWall(-5.4);
     drawWall(5.4);
     drawBoard();
+    //disk buffer
+    drawDisk();//uses a diferent buffer
+}
+
+function bindCubeBuffers() {
+    gl.bindBuffer(gl.ARRAY_BUFFER, cubeAttributesBuffer);
+    gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 4*(3+3), 0);
+    gl.vertexAttribPointer(vertexColorAttribute, 3, gl.FLOAT, false, 4*(3+3), 3*4);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeIndicesBuffer);
 }
 
 function drawWall(ypos) {
     mat4.identity(mvMatrix);
     mat4.translate(mvMatrix, [0, ypos, -10]);
     mat4.scale(mvMatrix, [7, 0.2, 0.2]);
-
     gl.uniformMatrix4fv(glProgram.uMVMatrix, false, mvMatrix);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, cubeAttributesBuffer);
-    gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 4*(3+3), 0);
-    gl.vertexAttribPointer(vertexColorAttribute, 3, gl.FLOAT, false, 4*(3+3), 4*3);
-
     gl.uniform3f(glProgram.ucolor, 0, 0.7, 0);
-
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeIndicesBuffer);
     gl.drawElements(gl.TRIANGLES, 6*6, gl.UNSIGNED_SHORT, 0);
 }
 
@@ -437,16 +479,8 @@ function drawBoard() {
     mat4.identity(mvMatrix);
     mat4.translate(mvMatrix, [0, 0, -12.0]);
     mat4.scale(mvMatrix, [7, 5.6, 1.8]);
-
     gl.uniformMatrix4fv(glProgram.uMVMatrix, false, mvMatrix);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, cubeAttributesBuffer);
-    gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 4*(3+3), 0);
-    gl.vertexAttribPointer(vertexColorAttribute, 3, gl.FLOAT, false, 4*(3+3), 4*3);
-
     gl.uniform3f(glProgram.ucolor, 0, 0.8, 0);
-
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeIndicesBuffer);
     gl.drawElements(gl.TRIANGLES, 6*6, gl.UNSIGNED_SHORT, 0);
 }
 
@@ -455,26 +489,19 @@ function drawBarPlayer(player) {
     mat4.translate(mvMatrix, [player.posX, player.posY, -9.9]);
     mat4.scale(mvMatrix, [0.2, 1.5, 0.3]);
     gl.uniformMatrix4fv(glProgram.uMVMatrix, false, mvMatrix);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, cubeAttributesBuffer);
-    gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 4*(3+3), 0);
-    gl.vertexAttribPointer(vertexColorAttribute, 3, gl.FLOAT, false, 4*(3+3), 3*4);
-
     gl.uniform3f(glProgram.ucolor, player.color.r, player.color.g, player.color.b);
-
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeIndicesBuffer);
     gl.drawElements(gl.TRIANGLES, 6*6, gl.UNSIGNED_SHORT, 0);
 }
 
 function drawDisk() {
+    gl.bindBuffer(gl.ARRAY_BUFFER, diskAttributesBuffer);
+    gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 4*(3+3), 0);
+    gl.vertexAttribPointer(vertexColorAttribute, 3, gl.FLOAT, false, 4*(3+3), 3*4);
+
     mat4.identity(mvMatrix);
     mat4.translate(mvMatrix, [disk.posX, disk.posY, -10.0]);
     mat4.scale(mvMatrix, [0.4, 0.4, 0.15]);
     gl.uniformMatrix4fv(glProgram.uMVMatrix, false, mvMatrix);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, diskAttributesBuffer);
-    gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 4*(3+3), 0);
-    gl.vertexAttribPointer(vertexColorAttribute, 3, gl.FLOAT, false, 4*(3+3), 3*4);
 
     gl.uniform3f(glProgram.ucolor, disk.color.r, disk.color.g, disk.color.b);
 
@@ -492,9 +519,6 @@ function getUniforms() {
     mat4.perspective(60, ratio, 0.1, 100, pMatrix);
     mat4.translate(pMatrix, [0.0, 7.0, -3.0]);
     mat4.rotate(pMatrix, 0.7, [-1.0, 0.0, 0.0]);
-    //watch disk
-    //mat4.translate(pMatrix, [0.0, 7.0, 5.0]);
-    //mat4.rotate(pMatrix, 0.7, [-1.0, 0.0, 0.0]);
 
     gl.uniformMatrix4fv(glProgram.uPMatrix, false, pMatrix);
 }

@@ -130,7 +130,6 @@ function onAnswerReceived(sdpAnswer) {
 }
 
 function onOpenDataChannelLocal() {
-    //TODO: Empezar comunicación
     console.log('Data Channel open');
     $('#sendText').prop('disabled', false);
     $('#sendText').click(sendMessage);
@@ -151,6 +150,7 @@ function sendMessage() {
             'content': msg
         }));
         $('#chat').append('<div><strong>Me:</strong> ' + msg + '</div>');
+        $('#chat').scrollTop($('#chat').prop('scrollHeight'));
     }
 }
 
@@ -168,7 +168,8 @@ function checkMasterPong() {
                 'type': 'GO!',
             }));
             window.masterPong = false;
-            window.pongRunning = true;
+            window.pongStarted = true;
+            newIntervalGo(10);
         }
     }
 }
@@ -198,17 +199,20 @@ function onDataChannelCreated(ev) {
 }
 
 function onMessageReceived(ev) {
-    //TODO: json stringify :  game
     var msg = JSON.parse(ev.data);
     if (msg.type === 'chat_message') {
         $('#chat').append('<div><strong>Other:</strong> ' + msg.content + '</div>');
+        $('#chat').scrollTop($('#chat').prop('scrollHeight'));
     } else if (msg.type === 'game_status'){
         updateStatusPong(msg); // in pong file
     } else if (msg.type === 'begin_game') {
         HisNumber = msg.number;
         checkMasterPong();
     } else if (msg.type === 'GO!') {
-        window.pongRunning = true;
+        window.pongStarted = true;
+        newIntervalGo(10);
+    } else if (msg.type === 'update_score') {
+        updateScore(msg);
     } else {
         console.error("Not defined type", msg.type);
     }
